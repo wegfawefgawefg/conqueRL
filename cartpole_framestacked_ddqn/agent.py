@@ -8,7 +8,7 @@ import torch.optim as optim
 import numpy as np
 
 from replay_buffer import ReplayBuffer
-from models import FCQNetwork, ConvQNetwork
+from models import FCQNetwork
 from utils import LinearSchedule
 
 class Agent():
@@ -38,12 +38,11 @@ class Agent():
         self.learn_step_counter = 0
         self.memory_minimum_fullness_announced = False
 
-        self.memory = ReplayBuffer(size=buffer_size, state_shape=state_shape, num_actions=self.num_actions)
+        self.memory = ReplayBuffer(size=1_000_000, state_shape=state_shape, num_actions=self.num_actions)
 
         self.epsilon = LinearSchedule(start=1.0, end=0.01, num_steps=500)
 
-        # self.q_net = FCQNetwork(state_shape, num_actions).to(self.device)
-        self.q_net = ConvQNetwork(state_shape, num_actions).to(self.device)
+        self.q_net = FCQNetwork(state_shape, num_actions).to(self.device)
         self.target_q_net = copy.deepcopy(self.q_net).to(self.device)
 
         self.optimizer = torch.optim.Adam(self.q_net.parameters(), lr=learn_rate)

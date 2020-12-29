@@ -8,18 +8,22 @@ import torch.optim as optim
 import numpy as np
 
 from replay_buffer import ReplayBuffer
-from models import FCQNetwork, ConvQNetwork
+from models import ThreeByThree, ICM
 from utils import LinearSchedule
 
 class Agent():
     def __init__(self, 
             state_shape,
             num_actions,
-            batch_size=64,
+            batch_size=32,
             gamma=0.99,
             learn_rate=3e-4,    
             buffer_size=100_000,
             min_buffer_fullness=64,
+            max_reward=1.0,
+
+            icm_max_reward=1.0,
+            only_intrinsic_rewards=False,
             ):
 
         '''     SETTINGS    '''
@@ -29,6 +33,11 @@ class Agent():
         self.batch_size = batch_size
         self.num_actions = num_actions
         self.gamma = gamma
+        self.max_reward = max_reward
+
+        self.icm_max_reward = icm_max_reward
+        self.only_intrinsic_rewards=only_intrinsic_rewards
+        self.intrinsic_rewards_ratio = 0.5
 
         self.min_buffer_fullness = min_buffer_fullness
 
@@ -42,11 +51,12 @@ class Agent():
 
         self.epsilon = LinearSchedule(start=1.0, end=0.01, num_steps=500)
 
-        # self.q_net = FCQNetwork(state_shape, num_actions).to(self.device)
-        self.q_net = ConvQNetwork(state_shape, num_actions).to(self.device)
+        self.q_net = ThreeByThree(input_shape=state_shape, num_outputs=num_actions).to(self.device)
         self.target_q_net = copy.deepcopy(self.q_net).to(self.device)
+        self.icm = ICM(input_shape=state_shape, num_actions=num_actions).to(self.device)
 
-        self.optimizer = torch.optim.Adam(self.q_net.parameters(), lr=learn_rate)
+        self.optimizer = torch.optim.Adam(
+            list(self.q_net.parameters()) +  list(self.icm.parameters()), lr=learn_rate)
 
     def choose_action(self, observation):
         if random.random() > self.epsilon.value():
@@ -69,6 +79,16 @@ class Agent():
 
         self.memory.store_memory(state, action_one_hot, reward, state_, done)
 
+    def get_icm_loss(self, data):
+        states, actions, rewards, states_, dones = data
+        next_state_enc, next_state_enc_preds, retrospective_action_preds = self.icm(states, states_, actions)
+
+        #   sum pooling before mean pooling? weird
+        forward_loss = (next_state_enc - next_state_enc_preds).sum(dim=1)**2
+        inverse_loss = (actions - retrospective_action_preds).sum(dim=1)**2
+
+        return forward_loss, inverse_loss
+        
     def get_q_network_loss(self, data):
         states, actions, rewards, states_, dones = data
 
@@ -97,10 +117,22 @@ class Agent():
             self.memory_minimum_fullness_announced = True
 
         states, actions, rewards, states_, dones = self.memory.sample(self.batch_size, self.device)
+        forward_loss, inverse_loss = self.get_icm_loss((states, actions, rewards, states_, dones))
+        intrinsic_rewards = forward_loss.detach().view(self.batch_size, 1)
+        # intrinsic_rewards = torch.clamp(forward_loss, self.icm_max_reward, self.icm_max_reward).detach().view(self.batch_size, 1) # its MSE'd already, so the min will never be less than 0
+        if self.only_intrinsic_rewards:
+            rewards = intrinsic_rewards
+        else:
+            # rewards = intrinsic_rewards * self.intrinsic_rewards_ratio + rewards * (1.0 - self.intrinsic_rewards_ratio)
+            rewards += intrinsic_rewards
+        # rewards = torch.clamp(rewards, -self.max_reward, self.max_reward)
         q_network_loss = self.get_q_network_loss((states, actions, rewards, states_, dones))
 
+        forward_loss = forward_loss.mean()
+        inverse_loss = inverse_loss.mean()
+
         self.optimizer.zero_grad()
-        loss = q_network_loss
+        loss = q_network_loss + forward_loss + inverse_loss
         loss.backward()
         self.optimizer.step()
 
