@@ -12,27 +12,14 @@ class ConvFrontEnd(torch.nn.Module):
         self.conv1 = nn.Conv2d(self.num_channels, 32, 8, stride=4)
         self.conv2 = nn.Conv2d(32, 64, 4, stride=2)
         self.conv3 = nn.Conv2d(64, 64, 3, stride=1)
-        # self.bn1 = nn.BatchNorm2d(16)
-        # self.bn2 = nn.BatchNorm2d(32)
-        # self.bn3 = nn.BatchNorm2d(32)
         # self.maxPool1 = nn.MaxPool2d(2, 2)
-        # self.maxPool2 = nn.MaxPool2d(2, 2)
-        # self.maxPool3 = nn.MaxPool2d(2, 2)
 
     def forward(self, x):
         x = self.conv1(x)
-        # x = self.bn1(x)
-        # x = self.maxPool1(x)
         x = F.relu(x)
-
         x = self.conv2(x)
-        # x = self.bn2(x)
-        # x = self.maxPool2(x)
         x = F.relu(x)
-
         x = self.conv3(x)
-        # x = self.bn3(x)
-        # x = self.maxPool3(x)
         x = F.relu(x)
 
         return x
